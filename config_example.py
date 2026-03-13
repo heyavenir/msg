@@ -1,3 +1,5 @@
+import sys
+sys.path.insert(0, "libs/mem0")
 from mem0 import Memory
 
 # --- Ollama (로컬) ---
