@@ -1,7 +1,7 @@
 from memory.mem0_adapter import Mem0Memory
-from memory.zep_adapter import ZepMemory
+from memory.zep_adapter import GraphitiDryRunMemory
 
 MEMORY_SYSTEMS = {
     "mem0": Mem0Memory,
-    "zep": ZepMemory,
+    "graphiti_dryrun": GraphitiDryRunMemory,
 }
