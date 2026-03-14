@@ -59,8 +59,8 @@ mem0_config = {
 }
 
 if __name__ == "__main__":
-    benchmark = LoCoMoBenchmark(split="test")
-    benchmark.load()  # HuggingFace에서 자동 다운로드
+    benchmark = LoCoMoBenchmark()
+    benchmark.load()  # 기본값: data/locomo/locomo10.json
 
     memory = Mem0Memory(config=mem0_config)
 
