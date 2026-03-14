@@ -60,7 +60,7 @@ class EvalRunner:
             # 대화 내용을 메모리에 순서대로 저장
             for turn in session.turns:
                 self.memory.add(
-                    content=f"{turn.role}: {turn.content}",
+                    content=turn.content,
                     user_id=session.session_id,
                 )
 
