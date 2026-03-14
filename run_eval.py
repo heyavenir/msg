@@ -3,6 +3,7 @@
 """
 import sys
 sys.path.insert(0, ".")
+sys.path.insert(0, "libs/mem0")
 
 from benchmarks.locomo import LoCoMoBenchmark
 from memory.mem0_adapter import Mem0Memory

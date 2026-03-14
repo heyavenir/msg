@@ -146,7 +146,7 @@ QA pairs (199개)
 
 ### 메모리 시스템 비교
 ```
-LoCoMo × {mem0, zep, custom} × qwen:32b
+LoCoMo × {mem0, graphiti_dryrun, custom} × qwen:32b
 ```
 
 ### 벤치마크 확장
@@ -164,6 +164,25 @@ LoCoMo × {mem0, zep, custom} × qwen:32b
 
 ---
 
+## 프로젝트 구조
+
+```
+msg/
+├── benchmarks/          # LoCoMo, LongMemEval, CAME-Bench
+├── memory/
+│   ├── mem0_adapter.py        # mem0 로컬 (libs/mem0)
+│   ├── zep_adapter.py         # GraphitiDryRunMemory (graphiti extraction dry-run)
+│   └── custom/                # 커스텀 메모리 추가용
+├── eval/                # EvalRunner, F1/EM metrics
+├── data/locomo/         # locomo10.json
+├── results/             # JSON + summary.csv
+├── libs/
+│   ├── mem0/            # mem0 소스 (editable 설치)
+│   │   └── evaluation/  # 공식 LoCoMo eval 코드 (MemoryClient 기반)
+│   └── graphiti/        # graphiti-core 소스
+└── run_eval.py          # 실행 진입점
+```
+
 ## 실행 방법
 
 ```bash
@@ -176,3 +195,15 @@ ollama serve &
 # 평가 실행
 python run_eval.py
 ```
+
+## 참고: 공식 mem0 eval 코드 (`libs/mem0/evaluation/`)
+
+mem0 공식 LoCoMo 평가 코드가 `libs/mem0/evaluation/`에 있음.
+우리 구현과 주요 차이점:
+
+| | 우리 구현 | 공식 mem0 eval |
+|---|---|---|
+| user_id | session_id 하나 | speaker별 2개 (`Caroline_0`, `Melanie_0`) |
+| add/search | 한 번에 실행 | 단계 분리 (`--method add` → `--method search`) |
+| LLM | 로컬 Ollama | mem0 cloud API + OpenAI |
+| 검색 | 단일 user 검색 | 두 speaker 메모리 모두 검색 후 합산 |
