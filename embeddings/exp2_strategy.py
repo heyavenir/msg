@@ -1,11 +1,13 @@
 """
 실험 2: 전략 조합 비교 (Strategy Combination Test)
 
-4가지 전략(프롬프트 × 풀링 방식)의 임베딩 성능 비교.
-- Synonym Pairs: 병합 유사도 측정 (높을수록 좋음)
-- Distinct Pairs: 분별 유사도 측정 (낮을수록 좋음)
-- Irrelevant Pairs: 격리 측정 (매우 낮아야 함)
-- Margin = Avg(Synonym_Sim) - Avg(Distinct_Sim) → 클수록 좋음
+[Pipeline]
+1. Context Fetching: Gemini google_search 툴로 키워드별 context 1회 확보 (고정)
+2. Semantic Enrichment: 고정 context를 바탕으로 전략별 영문 프로필 생성
+3. Local Embedding: Qwen-0.6B로 임베딩 (전략별 풀링 방식 적용)
+4. Similarity Analysis: 코사인 유사도 측정 → Margin 순위 리포트
+
+Margin = Avg(Synonym_Sim) - Avg(Distinct_Sim) → 클수록 좋음
 
 실행 방법:
     export GEMINI_ENDPOINT="https://your-endpoint/v1"
@@ -20,7 +22,7 @@ import os
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Literal, Tuple
+from typing import Dict, List, Literal, Tuple
 
 # embeddings/ 디렉토리를 sys.path에 추가 (utils 임포트용)
 sys.path.insert(0, os.path.dirname(__file__))
@@ -31,6 +33,7 @@ from utils import (
     RESULTS_DIR,
     PoolingMode,
     call_gemini,
+    fetch_context,
     get_cosine_similarity,
     get_embedding,
 )
@@ -50,15 +53,19 @@ PairType = Literal["synonym", "distinct", "irrelevant"]
 class Strategy:
     """전략 정의 (프롬프트 템플릿 + 풀링 방식)"""
     name: str              # "A", "B", "C", "D"
-    prompt_template: str   # '[Interest]' placeholder 포함
+    prompt_template: str   # [Interest], [Context] placeholder 포함
     pooling: PoolingMode
-    description: str       # 한줄 설명 (한국어)
+    description: str
 
 
+# context를 주입받는 형태로 재설계
+# [Context]: fetch_context()로 확보한 고정 텍스트
+# [Interest]: 키워드
 STRATEGIES: List[Strategy] = [
     Strategy(
         name="A",
         prompt_template=(
+            "Context about '[Interest]':\n[Context]\n\n"
             "Provide a concise dictionary-style definition for '[Interest]' "
             "in 2-3 English sentences. Standard facts only."
         ),
@@ -68,6 +75,7 @@ STRATEGIES: List[Strategy] = [
     Strategy(
         name="B",
         prompt_template=(
+            "Context about '[Interest]':\n[Context]\n\n"
             "Create a specific English profile for '[Interest]'. "
             "Emphasize unique identifiers (location, specific ingredients, or technical origins) "
             "to distinguish it from similar items. Use unique domain terms."
@@ -78,6 +86,7 @@ STRATEGIES: List[Strategy] = [
     Strategy(
         name="C",
         prompt_template=(
+            "Context about '[Interest]':\n[Context]\n\n"
             "Generate an English expansion for '[Interest]'. "
             "List and repeat all synonyms and related names "
             "(e.g., Dog, Puppy, Canine) at the start and throughout the text "
@@ -89,6 +98,7 @@ STRATEGIES: List[Strategy] = [
     Strategy(
         name="D",
         prompt_template=(
+            "Context about '[Interest]':\n[Context]\n\n"
             "Create a structured English profile for '[Interest]'. "
             "Section 1: List all synonyms. "
             "Section 2: Describe unique identity and specific discriminators "
@@ -135,6 +145,8 @@ class PairResult:
     keyword_a: str
     keyword_b: str
     pair_type: PairType
+    context_a: str
+    context_b: str
     text_a: str
     text_b: str
     similarity: float
@@ -160,7 +172,21 @@ def _safe_mean(values: List[float]) -> float:
     return sum(values) / len(values) if values else 0.0
 
 
+def _build_prompt(template: str, keyword: str, context: str) -> str:
+    return template.replace("[Interest]", keyword).replace("[Context]", context)
+
+
 def run_experiment() -> Tuple[List[PairResult], List[StrategyAnalysis]]:
+    # Step 1: 모든 키워드의 context를 미리 확보 (키워드당 1회, 전략 간 재사용)
+    all_keywords = list({kw for pair in TEST_PAIRS for kw in (pair.keyword_a, pair.keyword_b)})
+    print("=" * 60)
+    print("Step 1: 키워드별 Context 확보 (google_search)")
+    print("=" * 60)
+    context_cache: Dict[str, str] = {}
+    for keyword in all_keywords:
+        context_cache[keyword] = fetch_context(keyword)
+
+    # Step 2: 전략별 실험
     all_pair_results: List[PairResult] = []
 
     for strategy in STRATEGIES:
@@ -169,9 +195,11 @@ def run_experiment() -> Tuple[List[PairResult], List[StrategyAnalysis]]:
         print(f"{'='*60}")
 
         for pair in TEST_PAIRS:
-            # '[Interest]' 치환
-            prompt_a = strategy.prompt_template.replace("[Interest]", pair.keyword_a)
-            prompt_b = strategy.prompt_template.replace("[Interest]", pair.keyword_b)
+            context_a = context_cache[pair.keyword_a]
+            context_b = context_cache[pair.keyword_b]
+
+            prompt_a = _build_prompt(strategy.prompt_template, pair.keyword_a, context_a)
+            prompt_b = _build_prompt(strategy.prompt_template, pair.keyword_b, context_b)
 
             text_a = call_gemini(prompt_a)
             text_b = call_gemini(prompt_b)
@@ -180,16 +208,17 @@ def run_experiment() -> Tuple[List[PairResult], List[StrategyAnalysis]]:
             emb_b = get_embedding(text_b, pooling=strategy.pooling)
             sim = get_cosine_similarity(emb_a, emb_b)
 
-            result = PairResult(
+            all_pair_results.append(PairResult(
                 strategy_name=strategy.name,
                 keyword_a=pair.keyword_a,
                 keyword_b=pair.keyword_b,
                 pair_type=pair.pair_type,
+                context_a=context_a,
+                context_b=context_b,
                 text_a=text_a,
                 text_b=text_b,
                 similarity=sim,
-            )
-            all_pair_results.append(result)
+            ))
             print(f"  ({pair.keyword_a}, {pair.keyword_b}) [{pair.pair_type:>10}]: {sim:.4f}")
 
     analyses = _compute_analysis(all_pair_results)
@@ -197,15 +226,12 @@ def run_experiment() -> Tuple[List[PairResult], List[StrategyAnalysis]]:
 
 
 def _compute_analysis(pair_results: List[PairResult]) -> List[StrategyAnalysis]:
-    """전략별 집계 분석 및 margin 계산"""
     from collections import defaultdict
 
-    # strategy_name → pair_type → [similarity, ...]
     grouped: dict = defaultdict(lambda: defaultdict(list))
     for r in pair_results:
         grouped[r.strategy_name][r.pair_type].append(r.similarity)
 
-    # 전략 순서 유지
     strategy_map = {s.name: s for s in STRATEGIES}
     analyses: List[StrategyAnalysis] = []
     for name, strategy in strategy_map.items():
@@ -223,7 +249,6 @@ def _compute_analysis(pair_results: List[PairResult]) -> List[StrategyAnalysis]:
             pair_results=[r for r in pair_results if r.strategy_name == name],
         ))
 
-    # margin 내림차순 정렬
     analyses.sort(key=lambda a: a.margin, reverse=True)
     return analyses
 
@@ -240,41 +265,33 @@ def print_tables(
     print("\n" + "=" * 70)
     print("=== Experiment 2: 전략별 쌍 유사도 ===")
     print("=" * 70)
-    header = f"{'Strategy':<10}  {'Pair':<18}  {'Type':<11}  {'Similarity':>10}"
-    print(header)
+    print(f"{'Strategy':<10}  {'Pair':<18}  {'Type':<11}  {'Similarity':>10}")
     print(f"{'-'*10}  {'-'*18}  {'-'*11}  {'-'*10}")
     for r in pair_results:
         pair_label = f"{r.keyword_a} / {r.keyword_b}"
-        print(
-            f"{r.strategy_name:<10}  {pair_label:<18}  "
-            f"{r.pair_type:<11}  {r.similarity:>10.4f}"
-        )
+        print(f"{r.strategy_name:<10}  {pair_label:<18}  {r.pair_type:<11}  {r.similarity:>10.4f}")
 
-    # 테이블 2: 전략별 margin 순위
+    # 테이블 2: margin 순위
     print("\n" + "=" * 75)
     print("=== 전략 분석 (Margin = Avg_Synonym - Avg_Distinct) ===")
     print("=" * 75)
-    header2 = (
+    print(
         f"{'Rank':<5}  {'Strategy':<10}  "
         f"{'Avg_Synonym':>11}  {'Avg_Distinct':>12}  "
         f"{'Avg_Irrelevant':>14}  {'Margin':>8}"
     )
-    print(header2)
     print(f"{'-'*5}  {'-'*10}  {'-'*11}  {'-'*12}  {'-'*14}  {'-'*8}")
     for rank, a in enumerate(analyses, start=1):
-        best_mark = "  ← Best" if rank == 1 else ""
+        best = "  ← Best" if rank == 1 else ""
         print(
             f"{rank:<5}  {a.strategy_name:<10}  "
             f"{a.avg_synonym_sim:>11.4f}  {a.avg_distinct_sim:>12.4f}  "
-            f"{a.avg_irrelevant_sim:>14.4f}  {a.margin:>8.4f}"
-            f"{best_mark}"
+            f"{a.avg_irrelevant_sim:>14.4f}  {a.margin:>8.4f}{best}"
         )
     print("=" * 75)
     best = analyses[0]
     print(f"\n최적 전략: Strategy {best.strategy_name} ({best.description})")
-    print(f"  Margin = {best.margin:.4f}  "
-          f"(Avg_Synonym={best.avg_synonym_sim:.4f}, "
-          f"Avg_Distinct={best.avg_distinct_sim:.4f})\n")
+    print(f"  Margin = {best.margin:.4f}  (Synonym={best.avg_synonym_sim:.4f}, Distinct={best.avg_distinct_sim:.4f})\n")
 
 
 # ---------------------------------------------------------------------------
@@ -289,7 +306,6 @@ def save_results(
     ts_file = datetime.now().strftime("%Y%m%d_%H%M%S")
     ts_iso = datetime.now().isoformat()
 
-    # StrategyAnalysis → JSON 직렬화 (pair_results 필드 제외하고 따로 저장)
     analyses_dicts = [
         {
             "strategy_name": a.strategy_name,
@@ -309,6 +325,7 @@ def save_results(
         "timestamp": ts_iso,
         "model_embedding": EMBEDDING_MODEL,
         "model_gemini": GEMINI_MODEL,
+        "pipeline": ["fetch_context (google_search, per keyword)", "call_gemini (fixed context)", "qwen embedding", "cosine similarity"],
         "strategies": [
             {"name": s.name, "pooling": s.pooling, "description": s.description}
             for s in STRATEGIES
@@ -320,27 +337,24 @@ def save_results(
         json.dump(payload, f, ensure_ascii=False, indent=2)
     print(f"결과 저장: {json_path}")
 
-    # CSV 저장 (행: strategy×pair)
+    # CSV 저장
     csv_path = os.path.join(RESULTS_DIR, f"exp2_{ts_file}.csv")
+    strategy_desc = {s.name: s.description for s in STRATEGIES}
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow([
             "timestamp", "strategy_name", "strategy_description",
             "keyword_a", "keyword_b", "pair_type",
-            "similarity", "text_a", "text_b",
+            "similarity", "context_a", "context_b", "text_a", "text_b",
         ])
-        strategy_desc = {s.name: s.description for s in STRATEGIES}
         for r in pair_results:
             writer.writerow([
                 ts_iso,
                 r.strategy_name,
                 strategy_desc.get(r.strategy_name, ""),
-                r.keyword_a,
-                r.keyword_b,
-                r.pair_type,
+                r.keyword_a, r.keyword_b, r.pair_type,
                 f"{r.similarity:.4f}",
-                r.text_a,
-                r.text_b,
+                r.context_a, r.context_b, r.text_a, r.text_b,
             ])
     print(f"결과 저장: {csv_path}")
 

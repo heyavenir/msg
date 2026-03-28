@@ -1,10 +1,13 @@
 """
 실험 1: Gemini 생성 일관성 테스트 (Generation Consistency)
 
-동일 키워드에 대해 Gemini가 매번 일관된 텍스트를 생성하는지 검증.
-- 키워드 3개 × 5회 생성
-- 메트릭: 단어 Jaccard 유사도, Qwen 임베딩 코사인 유사도
-- 통과 기준: 평균 코사인 유사도 >= 0.98
+[Pipeline]
+1. Context Fetching: Gemini google_search 툴로 키워드별 context 1회 확보 (고정)
+2. Semantic Enrichment: 고정된 context를 바탕으로 Gemini가 영문 프로필 5회 생성
+3. Local Embedding: Qwen-0.6B로 각 텍스트 임베딩
+4. Similarity Analysis: 5개 텍스트 간 단어 overlap + 코사인 유사도 측정
+
+통과 기준: 평균 코사인 유사도 >= 0.98
 
 실행 방법:
     export GEMINI_ENDPOINT="https://your-endpoint/v1"
@@ -18,7 +21,7 @@ import json
 import os
 import re
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from itertools import combinations
 from typing import List
@@ -31,6 +34,7 @@ from utils import (
     GEMINI_MODEL,
     RESULTS_DIR,
     call_gemini,
+    fetch_context,
     get_cosine_similarity,
     get_embedding,
 )
@@ -43,9 +47,11 @@ KEYWORDS: List[str] = ["도마뱀", "말차", "토트넘"]
 NUM_RUNS: int = 5
 COSINE_THRESHOLD: float = 0.98
 
-# Gemini에 보낼 고정 프롬프트
-# 출력 형식을 최대한 고정하여 재현성 확보
+# context를 주입받아 순수 변환만 수행하는 프롬프트
+# fetch_context()가 context를 고정하므로 재현성 확보
 PROMPT_TEMPLATE: str = (
+    "Based on the following context about '{keyword}':\n"
+    "{context}\n\n"
     "Write exactly 2 factual sentences about '{keyword}'. "
     "Start the first sentence with 'A {keyword} is' or '{keyword} is'. "
     "Do not add any preamble, headers, bullet points, or closing remarks. "
@@ -61,6 +67,7 @@ PROMPT_TEMPLATE: str = (
 class KeywordConsistencyResult:
     """키워드별 5회 실행 집계 결과"""
     keyword: str
+    context: str                  # fetch_context()로 확보한 고정 context
     texts: List[str]              # 5개 생성 텍스트
     avg_word_overlap: float       # Jaccard 유사도 평균 (C(5,2)=10 쌍)
     avg_cosine_similarity: float  # 코사인 유사도 평균
@@ -96,20 +103,27 @@ def run_experiment() -> List[KeywordConsistencyResult]:
     results: List[KeywordConsistencyResult] = []
 
     for keyword in KEYWORDS:
-        print(f"\n[{keyword}] 생성 시작 ({NUM_RUNS}회)")
-        prompt = PROMPT_TEMPLATE.format(keyword=keyword)
-        texts: List[str] = []
+        print(f"\n{'='*60}")
+        print(f"[{keyword}]")
+        print(f"{'='*60}")
 
+        # Step 1: context 1회 확보 (고정)
+        context = fetch_context(keyword)
+
+        # Step 2: 고정 context 기반으로 5회 생성
+        prompt = PROMPT_TEMPLATE.format(keyword=keyword, context=context)
+        texts: List[str] = []
+        print(f"  영문 프로필 {NUM_RUNS}회 생성 중...")
         for i in range(NUM_RUNS):
             text = call_gemini(prompt)
             texts.append(text)
-            print(f"  run {i + 1}/{NUM_RUNS}: {text[:60]}...")
+            print(f"  run {i + 1}/{NUM_RUNS}: {text[:70]}...")
 
-        # 임베딩 계산 (mean pooling)
-        print(f"  [{keyword}] 임베딩 계산 중...")
+        # Step 3: 임베딩 계산 (mean pooling)
+        print(f"  임베딩 계산 중...")
         embeddings = [get_embedding(t, pooling="mean") for t in texts]
 
-        # C(5,2)=10 쌍 계산
+        # Step 4: C(5,2)=10 쌍 유사도 계산
         pairs = list(combinations(range(NUM_RUNS), 2))
         overlap_scores = [word_overlap_rate(texts[i], texts[j]) for i, j in pairs]
         cosine_scores = [get_cosine_similarity(embeddings[i], embeddings[j]) for i, j in pairs]
@@ -119,16 +133,16 @@ def run_experiment() -> List[KeywordConsistencyResult]:
         min_cosine = min(cosine_scores)
         passed = avg_cosine >= COSINE_THRESHOLD
 
-        result = KeywordConsistencyResult(
+        results.append(KeywordConsistencyResult(
             keyword=keyword,
+            context=context,
             texts=texts,
             avg_word_overlap=avg_overlap,
             avg_cosine_similarity=avg_cosine,
             min_cosine_similarity=min_cosine,
             passed=passed,
-        )
-        results.append(result)
-        print(f"  [{keyword}] avg_cosine={avg_cosine:.4f}, passed={'PASS' if passed else 'FAIL'}")
+        ))
+        print(f"  → avg_cosine={avg_cosine:.4f}  {'PASS ✓' if passed else 'FAIL ✗'}")
 
     return results
 
@@ -142,22 +156,17 @@ def print_table(results: List[KeywordConsistencyResult]) -> None:
     print("=== Experiment 1: Gemini 생성 일관성 ===")
     print("=" * 62)
     header = f"{'Keyword':<12}  {'Word Overlap':>12}  {'Avg Cosine':>10}  {'Min Cosine':>10}  {'Result':>6}"
-    sep = f"{'-'*12}  {'-'*12}  {'-'*10}  {'-'*10}  {'-'*6}"
     print(header)
-    print(sep)
+    print(f"{'-'*12}  {'-'*12}  {'-'*10}  {'-'*10}  {'-'*6}")
     for r in results:
-        result_str = "PASS" if r.passed else "FAIL"
         print(
             f"{r.keyword:<12}  {r.avg_word_overlap:>12.4f}  "
             f"{r.avg_cosine_similarity:>10.4f}  {r.min_cosine_similarity:>10.4f}  "
-            f"{result_str:>6}"
+            f"{'PASS' if r.passed else 'FAIL':>6}"
         )
     print("=" * 62)
     all_passed = all(r.passed for r in results)
-    print(f"최종 결과: {'전체 PASS' if all_passed else '일부 FAIL — 프롬프트 수정 권장'}")
-    if not all_passed:
-        print("  팁: 프롬프트에 'Do not add any preamble.' 옵션을 추가해보세요.")
-    print()
+    print(f"최종 결과: {'전체 PASS ✓' if all_passed else '일부 FAIL ✗'}\n")
 
 
 # ---------------------------------------------------------------------------
@@ -179,6 +188,7 @@ def save_results(results: List[KeywordConsistencyResult]) -> None:
         "num_runs": NUM_RUNS,
         "cosine_threshold": COSINE_THRESHOLD,
         "prompt_template": PROMPT_TEMPLATE,
+        "pipeline": ["fetch_context (google_search)", "call_gemini x5 (fixed context)", "qwen embedding", "cosine similarity"],
         "results": [dataclasses.asdict(r) for r in results],
     }
     with open(json_path, "w", encoding="utf-8") as f:
@@ -192,17 +202,16 @@ def save_results(results: List[KeywordConsistencyResult]) -> None:
         writer.writerow([
             "timestamp", "keyword",
             "avg_word_overlap", "avg_cosine_similarity", "min_cosine_similarity",
-            "passed",
+            "passed", "context",
             *[f"text_{i}" for i in range(NUM_RUNS)],
         ])
         for r in results:
             writer.writerow([
-                ts_iso,
-                r.keyword,
+                ts_iso, r.keyword,
                 f"{r.avg_word_overlap:.4f}",
                 f"{r.avg_cosine_similarity:.4f}",
                 f"{r.min_cosine_similarity:.4f}",
-                r.passed,
+                r.passed, r.context,
                 *r.texts,
             ])
     print(f"결과 저장: {csv_path}")

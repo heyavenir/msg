@@ -5,6 +5,7 @@
 - Mean / Last Token 풀링 전환 가능한 임베딩 함수
 - L2 정규화 적용 (코사인 유사도 = 내적)
 - Gemini OpenAI 호환 엔드포인트 호출 (GEMINI_ENDPOINT, GEMINI_BEARER_TOKEN)
+- fetch_context(): google_search 툴로 키워드 context 확보
 """
 
 import os
@@ -174,66 +175,28 @@ def _check_gemini_env() -> Tuple[str, str]:
     return endpoint, token
 
 
-def call_gemini(
-    prompt: str,
-    model_name: str = GEMINI_MODEL,
-    max_retries: int = 3,
-) -> str:
-    """
-    Gemini OpenAI 호환 엔드포인트 호출.
-
-    POST {GEMINI_ENDPOINT}/chat/completions  (또는 GEMINI_ENDPOINT 자체가 전체 URL인 경우)
-    Authorization: Bearer {GEMINI_BEARER_TOKEN}
-
-    Args:
-        prompt: 사용자 메시지
-        model_name: 모델명 (기본값: gemini-1.5-flash)
-        max_retries: 지수 백오프 최대 재시도 횟수
-
-    Returns:
-        생성된 텍스트 (stripped)
-
-    Raises:
-        ValueError: 환경변수 미설정 또는 빈 응답
-        requests.exceptions.HTTPError: 400번대 클라이언트 에러 (재시도 없음)
-        RuntimeError: max_retries 초과
-    """
+def _post_gemini(payload: dict, max_retries: int = 3) -> str:
+    """Gemini 엔드포인트에 POST 요청. 지수 백오프 재시도 포함."""
     url, token = _check_gemini_env()
-
-    payload = {
-        "model": model_name,
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0,
-    }
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
     }
 
-    # DEBUG: 실제 요청 내용 출력 (문제 해결 후 제거 예정)
-    print(f"  [DEBUG] URL: {url}")
-    print(f"  [DEBUG] payload: {payload}")
-
     last_exc: Optional[Exception] = None
     for attempt in range(max_retries):
         try:
-            resp = requests.post(
-                url,
-                headers=headers,
-                json=payload,
-                timeout=60,
-            )
+            resp = requests.post(url, headers=headers, json=payload, timeout=60)
             if not resp.ok:
                 print(f"  HTTP {resp.status_code}: {resp.text[:500]}")
-            resp.raise_for_status()  # 4xx/5xx → HTTPError
+            resp.raise_for_status()
 
             result = resp.json()["choices"][0]["message"]["content"].strip()
             if not result:
-                raise ValueError(f"Gemini 빈 응답 (prompt 앞부분: {prompt[:60]!r})")
+                raise ValueError("Gemini 빈 응답")
             return result
 
         except requests.exceptions.HTTPError as e:
-            # 400번대 클라이언트 에러 → 재시도 무의미
             if e.response is not None and 400 <= e.response.status_code < 500:
                 raise
             last_exc = e
@@ -241,10 +204,66 @@ def call_gemini(
                 requests.exceptions.Timeout) as e:
             last_exc = e
 
-        wait = 2 ** attempt  # 1s, 2s, 4s
+        wait = 2 ** attempt
         print(f"  Gemini API 재시도 {attempt + 1}/{max_retries} (대기 {wait}s): {last_exc}")
         time.sleep(wait)
 
-    raise RuntimeError(
-        f"Gemini API {max_retries}회 재시도 실패: {last_exc}"
+    raise RuntimeError(f"Gemini API {max_retries}회 재시도 실패: {last_exc}")
+
+
+def fetch_context(keyword: str, model_name: str = GEMINI_MODEL) -> str:
+    """
+    Gemini google_search 툴을 사용해 키워드에 대한 사실적 context를 확보.
+
+    실험 전 1회만 호출해 context를 고정한 뒤, 이후 call_gemini()에 주입.
+    이를 통해 Gemini의 비결정성을 context 레벨에서 제거.
+
+    Args:
+        keyword: 검색할 키워드 (한국어 가능)
+        model_name: 사용할 Gemini 모델
+
+    Returns:
+        키워드에 대한 사실적 설명 텍스트 (영문 또는 한국어)
+    """
+    prompt = (
+        f"'{keyword}'에 대해 웹에서 찾은 사실을 바탕으로 "
+        f"핵심 정의와 특징을 3-4문장으로 요약해줘. "
+        f"서론 없이 본문만 출력해."
     )
+    payload = {
+        "model": model_name,
+        "messages": [{"role": "user", "content": prompt}],
+        "tools": [{"google_search": {}}],
+        "temperature": 0,
+    }
+    print(f"  [context fetch] '{keyword}' 검색 중...")
+    context = _post_gemini(payload)
+    print(f"  [context fetch] 완료: {context[:80]}...")
+    return context
+
+
+def call_gemini(
+    prompt: str,
+    model_name: str = GEMINI_MODEL,
+    max_retries: int = 3,
+) -> str:
+    """
+    Gemini OpenAI 호환 엔드포인트 호출 (검색 없이 순수 텍스트 변환).
+
+    context는 prompt에 이미 포함된 상태로 호출.
+    temperature=0 고정으로 재현성 확보.
+
+    Args:
+        prompt: context가 주입된 완성된 프롬프트
+        model_name: 모델명
+        max_retries: 지수 백오프 최대 재시도 횟수
+
+    Returns:
+        생성된 텍스트 (stripped)
+    """
+    payload = {
+        "model": model_name,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0,
+    }
+    return _post_gemini(payload, max_retries)
