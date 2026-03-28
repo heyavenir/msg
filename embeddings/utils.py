@@ -200,10 +200,10 @@ def call_gemini(
     """
     url, token = _check_gemini_env()
 
-    # curl과 동일한 payload — temperature 미포함 (일부 엔드포인트에서 400 유발)
     payload = {
         "model": model_name,
         "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0,
     }
     headers = {
         "Authorization": f"Bearer {token}",
