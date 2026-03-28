@@ -34,10 +34,9 @@ from utils import (
     EMBEDDING_MODEL,
     GEMINI_MODEL,
     RESULTS_DIR,
-    call_gemini,
-    fetch_context,
     get_cosine_similarity,
     get_embedding,
+    search_and_enrich,
 )
 
 # ---------------------------------------------------------------------------
@@ -48,11 +47,11 @@ KEYWORDS: List[str] = ["도마뱀", "말차", "토트넘"]
 NUM_RUNS: int = 5
 COSINE_THRESHOLD: float = 0.98
 
-PROMPT_TEMPLATE: str = (
-    "Based on the following context about '{keyword}':\n"
-    "{context}\n\n"
-    "Write exactly 2 factual sentences about '{keyword}'. "
-    "Start the first sentence with 'A {keyword} is' or '{keyword} is'. "
+# PROFILE 생성 지침 — search_and_enrich()의 enrichment_instruction 인자로 전달
+# 한국어 키워드의 영어 변환은 search_and_enrich() 내부에서 자동 처리
+ENRICHMENT_INSTRUCTION: str = (
+    "Write exactly 2 factual sentences about the subject. "
+    "Start the first sentence with 'A [English term] is' or '[English term] is'. "
     "Do not add any preamble, headers, bullet points, or closing remarks. "
     "Output only the 2 sentences, nothing else."
 )
@@ -64,11 +63,10 @@ PROMPT_TEMPLATE: str = (
 
 @dataclass
 class RunRecord:
-    """단일 run 기록 — 어떤 context/prompt가 꽂혔는지 포함"""
+    """단일 run 기록 — 단일 API 호출로 context + profile 동시 획득"""
     run_index: int
-    context: str    # 이 run에서 fetch된 context
-    prompt: str     # Gemini에 실제 전송된 완성 프롬프트
-    text: str       # Gemini가 생성한 영문 텍스트
+    context: str    # 이 run에서 검색으로 확보된 context
+    text: str       # Gemini가 생성한 영문 프로필 (임베딩 대상)
 
 
 @dataclass
@@ -118,13 +116,10 @@ def run_experiment() -> List[KeywordConsistencyResult]:
         for i in range(NUM_RUNS):
             print(f"\n  --- run {i + 1}/{NUM_RUNS} ---")
 
-            # 매 run마다 독립적으로 context fetch (실제 서비스 시뮬레이션)
-            context = fetch_context(keyword)
+            # 검색 + 프로필 생성을 단일 API 호출로 처리 (실제 서비스 시뮬레이션)
+            context, text = search_and_enrich(keyword, ENRICHMENT_INSTRUCTION)
 
-            prompt = PROMPT_TEMPLATE.format(keyword=keyword, context=context)
-            text = call_gemini(prompt)
-
-            runs.append(RunRecord(run_index=i, context=context, prompt=prompt, text=text))
+            runs.append(RunRecord(run_index=i, context=context, text=text))
             print(f"  context: {context[:80]}...")
             print(f"  text:    {text[:80]}...")
 
@@ -204,10 +199,9 @@ def save_results(results: List[KeywordConsistencyResult]) -> None:
         "model_gemini": GEMINI_MODEL,
         "num_runs": NUM_RUNS,
         "cosine_threshold": COSINE_THRESHOLD,
-        "prompt_template": PROMPT_TEMPLATE,
+        "enrichment_instruction": ENRICHMENT_INSTRUCTION,
         "pipeline": [
-            "fetch_context per run (google_search, 독립 호출)",
-            "call_gemini (context 주입)",
+            "search_and_enrich per run (단일 호출: google_search + profile 생성)",
             "qwen embedding (mean pooling)",
             "cosine similarity",
         ],
@@ -233,7 +227,7 @@ def save_results(results: List[KeywordConsistencyResult]) -> None:
         writer = csv.writer(f)
         writer.writerow([
             "timestamp", "keyword", "run_index",
-            "context", "text",
+            "context", "profile",
             "avg_word_overlap", "avg_cosine_similarity",
             "min_cosine_similarity", "passed",
         ])

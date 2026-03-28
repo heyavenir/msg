@@ -214,21 +214,15 @@ def _post_gemini(payload: dict, max_retries: int = 3) -> str:
 def fetch_context(keyword: str, model_name: str = GEMINI_MODEL) -> str:
     """
     Gemini google_search 툴을 사용해 키워드에 대한 사실적 context를 확보.
-
-    실험 전 1회만 호출해 context를 고정한 뒤, 이후 call_gemini()에 주입.
-    이를 통해 Gemini의 비결정성을 context 레벨에서 제거.
-
-    Args:
-        keyword: 검색할 키워드 (한국어 가능)
-        model_name: 사용할 Gemini 모델
+    exp2에서 전략 간 비교를 위해 context를 고정할 때 사용.
 
     Returns:
-        키워드에 대한 사실적 설명 텍스트 (영문 또는 한국어)
+        키워드에 대한 사실적 요약 텍스트
     """
     prompt = (
-        f"'{keyword}'에 대해 웹에서 찾은 사실을 바탕으로 "
-        f"핵심 정의와 특징을 3-4문장으로 요약해줘. "
-        f"서론 없이 본문만 출력해."
+        f"Search for '{keyword}' online. "
+        f"Summarize the key facts in 2-3 sentences. "
+        f"Output only the summary, no preamble."
     )
     payload = {
         "model": model_name,
@@ -240,6 +234,66 @@ def fetch_context(keyword: str, model_name: str = GEMINI_MODEL) -> str:
     context = _post_gemini(payload)
     print(f"  [context fetch] 완료: {context[:80]}...")
     return context
+
+
+def search_and_enrich(
+    keyword: str,
+    enrichment_instruction: str,
+    model_name: str = GEMINI_MODEL,
+) -> Tuple[str, str]:
+    """
+    google_search + 영문 프로필 생성을 단일 API 호출로 처리. (exp1 전용)
+
+    Gemini가 검색 후 아래 형식으로 응답:
+        CONTEXT: <검색 결과 요약>
+        PROFILE: <영문 프로필>
+
+    한국어 키워드는 자동으로 영어 equivalent로 변환하여 프로필 생성.
+
+    Args:
+        keyword: 검색할 키워드 (한국어 가능)
+        enrichment_instruction: PROFILE 생성 지침 (전략별 다름)
+
+    Returns:
+        (context, profile) 튜플
+    """
+    prompt = (
+        f"Search for '{keyword}' online.\n\n"
+        f"Respond in EXACTLY this format with no other text:\n"
+        f"CONTEXT: [2-3 sentences summarizing key facts from search results]\n"
+        f"PROFILE: [{enrichment_instruction} "
+        f"If '{keyword}' is Korean or non-English, use its English equivalent as the subject.]\n"
+    )
+    payload = {
+        "model": model_name,
+        "messages": [{"role": "user", "content": prompt}],
+        "tools": [{"google_search": {}}],
+        "temperature": 0,
+    }
+    raw = _post_gemini(payload)
+
+    # CONTEXT / PROFILE 파싱
+    context, profile = _parse_context_profile(raw)
+    return context, profile
+
+
+def _parse_context_profile(raw: str) -> Tuple[str, str]:
+    """
+    'CONTEXT: ...\nPROFILE: ...' 형식 응답을 파싱.
+    형식이 맞지 않으면 전체 텍스트를 profile로 처리.
+    """
+    context = ""
+    profile = raw.strip()
+
+    if "PROFILE:" in raw:
+        parts = raw.split("PROFILE:", 1)
+        profile = parts[1].strip()
+        if "CONTEXT:" in parts[0]:
+            context = parts[0].split("CONTEXT:", 1)[1].strip()
+    elif "CONTEXT:" in raw:
+        context = raw.split("CONTEXT:", 1)[1].strip()
+
+    return context, profile
 
 
 def call_gemini(
