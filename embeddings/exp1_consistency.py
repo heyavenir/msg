@@ -138,15 +138,23 @@ def run_experiment() -> List[KeywordConsistencyResult]:
         min_cosine  = min(cosine_scores)
         passed      = avg_cosine >= COSINE_THRESHOLD
 
-        results.append(KeywordConsistencyResult(
+        result = KeywordConsistencyResult(
             keyword=keyword,
             runs=runs,
             avg_word_overlap=avg_overlap,
             avg_cosine_similarity=avg_cosine,
             min_cosine_similarity=min_cosine,
             passed=passed,
-        ))
-        print(f"\n  → avg_cosine={avg_cosine:.4f}  {'PASS ✓' if passed else 'FAIL ✗'}")
+        )
+        results.append(result)
+        # 키워드 완료 시 즉시 한 줄 출력
+        print(
+            f"\n  ✓ [{keyword}] "
+            f"word_overlap={avg_overlap:.4f}  "
+            f"avg_cosine={avg_cosine:.4f}  "
+            f"min_cosine={min_cosine:.4f}  "
+            f"{'PASS' if passed else 'FAIL'}"
+        )
 
     return results
 
@@ -249,6 +257,14 @@ def save_results(results: List[KeywordConsistencyResult]) -> None:
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    results = run_experiment()
-    print_table(results)
-    save_results(results)
+    results = []
+    try:
+        results = run_experiment()
+    except Exception as e:
+        print(f"\n실험 중 오류 발생: {e}")
+        raise
+    finally:
+        # 오류가 나도 지금까지의 결과는 출력
+        if results:
+            print_table(results)
+            save_results(results)
