@@ -210,6 +210,10 @@ def call_gemini(
         "Content-Type": "application/json",
     }
 
+    # DEBUG: 실제 요청 내용 출력 (문제 해결 후 제거 예정)
+    print(f"  [DEBUG] URL: {url}")
+    print(f"  [DEBUG] payload: {payload}")
+
     last_exc: Optional[Exception] = None
     for attempt in range(max_retries):
         try:
@@ -220,8 +224,7 @@ def call_gemini(
                 timeout=60,
             )
             if not resp.ok:
-                # 400 에러 시 응답 본문을 출력해 원인 파악 용이하게
-                print(f"  HTTP {resp.status_code}: {resp.text[:300]}")
+                print(f"  HTTP {resp.status_code}: {resp.text[:500]}")
             resp.raise_for_status()  # 4xx/5xx → HTTPError
 
             result = resp.json()["choices"][0]["message"]["content"].strip()
