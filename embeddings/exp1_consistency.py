@@ -64,9 +64,10 @@ PROMPT_TEMPLATE: str = (
 
 @dataclass
 class RunRecord:
-    """단일 run 기록 — 어떤 context가 꽂혔는지 포함"""
+    """단일 run 기록 — 어떤 context/prompt가 꽂혔는지 포함"""
     run_index: int
     context: str    # 이 run에서 fetch된 context
+    prompt: str     # Gemini에 실제 전송된 완성 프롬프트
     text: str       # Gemini가 생성한 영문 텍스트
 
 
@@ -123,7 +124,7 @@ def run_experiment() -> List[KeywordConsistencyResult]:
             prompt = PROMPT_TEMPLATE.format(keyword=keyword, context=context)
             text = call_gemini(prompt)
 
-            runs.append(RunRecord(run_index=i, context=context, text=text))
+            runs.append(RunRecord(run_index=i, context=context, prompt=prompt, text=text))
             print(f"  context: {context[:80]}...")
             print(f"  text:    {text[:80]}...")
 

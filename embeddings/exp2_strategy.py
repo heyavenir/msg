@@ -147,6 +147,8 @@ class PairResult:
     pair_type: PairType
     context_a: str
     context_b: str
+    prompt_a: str       # Gemini에 실제 전송된 완성 프롬프트
+    prompt_b: str
     text_a: str
     text_b: str
     similarity: float
@@ -215,6 +217,8 @@ def run_experiment() -> Tuple[List[PairResult], List[StrategyAnalysis]]:
                 pair_type=pair.pair_type,
                 context_a=context_a,
                 context_b=context_b,
+                prompt_a=prompt_a,
+                prompt_b=prompt_b,
                 text_a=text_a,
                 text_b=text_b,
                 similarity=sim,
@@ -345,7 +349,8 @@ def save_results(
         writer.writerow([
             "timestamp", "strategy_name", "strategy_description",
             "keyword_a", "keyword_b", "pair_type",
-            "similarity", "context_a", "context_b", "text_a", "text_b",
+            "similarity", "context_a", "context_b",
+            "prompt_a", "prompt_b", "text_a", "text_b",
         ])
         for r in pair_results:
             writer.writerow([
@@ -354,7 +359,8 @@ def save_results(
                 strategy_desc.get(r.strategy_name, ""),
                 r.keyword_a, r.keyword_b, r.pair_type,
                 f"{r.similarity:.4f}",
-                r.context_a, r.context_b, r.text_a, r.text_b,
+                r.context_a, r.context_b,
+                r.prompt_a, r.prompt_b, r.text_a, r.text_b,
             ])
     print(f"결과 저장: {csv_path}")
 
