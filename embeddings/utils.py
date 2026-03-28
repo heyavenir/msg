@@ -19,7 +19,7 @@ import requests
 # ---------------------------------------------------------------------------
 
 EMBEDDING_MODEL: str = "Qwen/Qwen2.5-0.5B-Instruct"
-GEMINI_MODEL: str = "gemini-1.5-flash"
+GEMINI_MODEL: str = "gemini-2.5-flash"
 RESULTS_DIR: str = os.path.join(os.path.dirname(__file__), "results")
 
 PoolingMode = Literal["mean", "last_token"]
