@@ -156,7 +156,7 @@ def get_cosine_similarity(vec1: np.ndarray, vec2: np.ndarray) -> float:
 
 def _check_gemini_env() -> Tuple[str, str]:
     """환경변수 존재 여부 확인. 미설정 시 즉시 ValueError."""
-    endpoint = os.environ.get("GEMINI_ENDPOINT", "").strip()
+    endpoint = os.environ.get("GEMINI_ENDPOINT", "").strip().rstrip("/")
     token = os.environ.get("GEMINI_BEARER_TOKEN", "").strip()
     if not endpoint:
         raise ValueError(
@@ -168,25 +168,26 @@ def _check_gemini_env() -> Tuple[str, str]:
             "GEMINI_BEARER_TOKEN 환경변수가 설정되지 않았습니다.\n"
             'export GEMINI_BEARER_TOKEN="your-bearer-token"'
         )
+    # GEMINI_ENDPOINT가 /chat/completions 포함 여부 상관없이 올바른 URL 구성
+    if not endpoint.endswith("/chat/completions"):
+        endpoint = f"{endpoint}/chat/completions"
     return endpoint, token
 
 
 def call_gemini(
     prompt: str,
     model_name: str = GEMINI_MODEL,
-    temperature: float = 0.0,
     max_retries: int = 3,
 ) -> str:
     """
     Gemini OpenAI 호환 엔드포인트 호출.
 
-    POST {GEMINI_ENDPOINT}/chat/completions
+    POST {GEMINI_ENDPOINT}/chat/completions  (또는 GEMINI_ENDPOINT 자체가 전체 URL인 경우)
     Authorization: Bearer {GEMINI_BEARER_TOKEN}
 
     Args:
         prompt: 사용자 메시지
         model_name: 모델명 (기본값: gemini-1.5-flash)
-        temperature: 0.0 고정 권장 (재현성)
         max_retries: 지수 백오프 최대 재시도 횟수
 
     Returns:
@@ -197,12 +198,12 @@ def call_gemini(
         requests.exceptions.HTTPError: 400번대 클라이언트 에러 (재시도 없음)
         RuntimeError: max_retries 초과
     """
-    endpoint, token = _check_gemini_env()
+    url, token = _check_gemini_env()
 
+    # curl과 동일한 payload — temperature 미포함 (일부 엔드포인트에서 400 유발)
     payload = {
         "model": model_name,
         "messages": [{"role": "user", "content": prompt}],
-        "temperature": temperature,
     }
     headers = {
         "Authorization": f"Bearer {token}",
@@ -213,11 +214,14 @@ def call_gemini(
     for attempt in range(max_retries):
         try:
             resp = requests.post(
-                f"{endpoint}/chat/completions",
+                url,
                 headers=headers,
                 json=payload,
                 timeout=60,
             )
+            if not resp.ok:
+                # 400 에러 시 응답 본문을 출력해 원인 파악 용이하게
+                print(f"  HTTP {resp.status_code}: {resp.text[:300]}")
             resp.raise_for_status()  # 4xx/5xx → HTTPError
 
             result = resp.json()["choices"][0]["message"]["content"].strip()
