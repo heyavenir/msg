@@ -43,10 +43,13 @@ KEYWORDS: List[str] = ["도마뱀", "말차", "토트넘"]
 NUM_RUNS: int = 5
 COSINE_THRESHOLD: float = 0.98
 
-# Gemini에 보낼 고정 프롬프트 (temperature=0이므로 동일 결과 기대)
+# Gemini에 보낼 고정 프롬프트
+# 출력 형식을 최대한 고정하여 재현성 확보
 PROMPT_TEMPLATE: str = (
-    "Provide a concise description of '{keyword}' in 2-3 English sentences. "
-    "Do not add any preamble."
+    "Write exactly 2 factual sentences about '{keyword}'. "
+    "Start the first sentence with 'A {keyword} is' or '{keyword} is'. "
+    "Do not add any preamble, headers, bullet points, or closing remarks. "
+    "Output only the 2 sentences, nothing else."
 )
 
 
