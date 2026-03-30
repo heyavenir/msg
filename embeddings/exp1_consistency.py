@@ -38,12 +38,17 @@ from utils import (
     get_embedding,
     search_and_enrich,
 )
+from dataset import InterestItem
 
 # ---------------------------------------------------------------------------
 # 설정
 # ---------------------------------------------------------------------------
 
-KEYWORDS: List[str] = ["도마뱀", "말차", "토트넘"]
+KEYWORDS: List[InterestItem] = [
+    InterestItem(category="Pets",  item="도마뱀"),
+    InterestItem(category="Food",  item="말차"),
+    InterestItem(category="Sport", item="토트넘"),
+]
 NUM_RUNS: int = 5
 COSINE_THRESHOLD: float = 0.98
 
@@ -72,7 +77,8 @@ class RunRecord:
 @dataclass
 class KeywordConsistencyResult:
     """키워드별 NUM_RUNS회 실행 집계 결과"""
-    keyword: str
+    keyword: str          # InterestItem.item
+    search_query: str     # InterestItem.search_query ("item category")
     runs: List[RunRecord]           # run별 (context, text) 전체 기록
     avg_word_overlap: float         # Jaccard 유사도 평균 (C(5,2)=10 쌍)
     avg_cosine_similarity: float    # 코사인 유사도 평균
@@ -108,7 +114,7 @@ def run_experiment() -> List[KeywordConsistencyResult]:
 
     for keyword in KEYWORDS:
         print(f"\n{'='*60}")
-        print(f"[{keyword}] — {NUM_RUNS}회 독립 실행")
+        print(f"[{keyword.item}] (search: '{keyword.search_query}') — {NUM_RUNS}회 독립 실행")
         print(f"{'='*60}")
 
         runs: List[RunRecord] = []
@@ -116,9 +122,8 @@ def run_experiment() -> List[KeywordConsistencyResult]:
         for i in range(NUM_RUNS):
             print(f"\n  --- run {i + 1}/{NUM_RUNS} ---")
 
-            # 검색 + 프로필 생성을 단일 API 호출로 처리 (실제 서비스 시뮬레이션)
-            # search_query = "keyword category" 형태로 모호성 제거
-            context, text = search_and_enrich(keyword, ENRICHMENT_INSTRUCTION)
+            # "item category" 형태로 검색하여 모호성 제거
+            context, text = search_and_enrich(keyword.search_query, ENRICHMENT_INSTRUCTION)
 
             runs.append(RunRecord(run_index=i, context=context, text=text))
             print(f"  context: {context[:80]}...")
@@ -140,7 +145,8 @@ def run_experiment() -> List[KeywordConsistencyResult]:
         passed      = avg_cosine >= COSINE_THRESHOLD
 
         result = KeywordConsistencyResult(
-            keyword=keyword,
+            keyword=keyword.item,
+            search_query=keyword.search_query,
             runs=runs,
             avg_word_overlap=avg_overlap,
             avg_cosine_similarity=avg_cosine,
@@ -150,7 +156,7 @@ def run_experiment() -> List[KeywordConsistencyResult]:
         results.append(result)
         # 키워드 완료 시 즉시 한 줄 출력
         print(
-            f"\n  ✓ [{keyword}] "
+            f"\n  ✓ [{keyword.item}] "
             f"word_overlap={avg_overlap:.4f}  "
             f"avg_cosine={avg_cosine:.4f}  "
             f"min_cosine={min_cosine:.4f}  "
@@ -217,6 +223,7 @@ def save_results(results: List[KeywordConsistencyResult]) -> None:
         "results": [
             {
                 "keyword": r.keyword,
+                "search_query": r.search_query,
                 "avg_word_overlap": r.avg_word_overlap,
                 "avg_cosine_similarity": r.avg_cosine_similarity,
                 "min_cosine_similarity": r.min_cosine_similarity,
