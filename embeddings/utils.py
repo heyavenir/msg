@@ -1,7 +1,7 @@
 """
 임베딩 실험 공유 유틸리티 모듈.
 
-- Qwen/Qwen2.5-0.5B-Instruct 모델 로딩 (싱글톤 캐시)
+- Qwen/Qwen3-Embedding-0.6B 모델 로딩 (싱글톤 캐시)
 - Mean / Last Token 풀링 전환 가능한 임베딩 함수
 - L2 정규화 적용 (코사인 유사도 = 내적)
 - Gemini OpenAI 호환 엔드포인트 호출 (GEMINI_ENDPOINT, GEMINI_BEARER_TOKEN)
@@ -19,7 +19,7 @@ import requests
 # 상수
 # ---------------------------------------------------------------------------
 
-EMBEDDING_MODEL: str = "Qwen/Qwen2.5-0.5B-Instruct"
+EMBEDDING_MODEL: str = "Qwen/Qwen3-Embedding-0.6B"
 GEMINI_MODEL: str = "gemini-2.5-flash"
 RESULTS_DIR: str = os.path.join(os.path.dirname(__file__), "results")
 
