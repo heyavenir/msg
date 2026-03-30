@@ -46,7 +46,7 @@ from dataset import INTERESTS, InterestItem
 
 # USE_DATASET = True  → dataset.py의 INTERESTS 전체 사용 (80개 × 5회 = 400 API 호출)
 # USE_DATASET = False → 아래 수동 지정 키워드 사용
-USE_DATASET: bool = False
+USE_DATASET: bool = True
 
 _MANUAL_KEYWORDS: List[InterestItem] = [
     InterestItem(category="Pets",  item="도마뱀"),

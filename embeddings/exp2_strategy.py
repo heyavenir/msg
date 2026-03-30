@@ -118,7 +118,7 @@ class TestPair:
 
 # USE_DATASET = True  → dataset.py의 INTERESTS에서 자동 생성
 # USE_DATASET = False → 아래 수동 지정 쌍 사용
-USE_DATASET: bool = False
+USE_DATASET: bool = True
 
 _MANUAL_PAIRS: List[TestPair] = [
     # 동의어 쌍 — 높은 유사도 기대
