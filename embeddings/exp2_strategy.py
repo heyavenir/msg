@@ -37,12 +37,7 @@ from utils import (
     get_cosine_similarity,
     get_embedding,
 )
-
-# ---------------------------------------------------------------------------
-# 타입
-# ---------------------------------------------------------------------------
-
-PairType = Literal["synonym", "distinct", "irrelevant"]
+from dataset import INTERESTS, InterestItem, PairType, build_test_pairs
 
 
 # ---------------------------------------------------------------------------
@@ -116,22 +111,32 @@ STRATEGIES: List[Strategy] = [
 
 @dataclass
 class TestPair:
-    keyword_a: str
-    keyword_b: str
+    item_a: InterestItem
+    item_b: InterestItem
     pair_type: PairType
 
 
-TEST_PAIRS: List[TestPair] = [
+# USE_DATASET = True  → dataset.py의 INTERESTS에서 자동 생성
+# USE_DATASET = False → 아래 수동 지정 쌍 사용
+USE_DATASET: bool = False
+
+_MANUAL_PAIRS: List[TestPair] = [
     # 동의어 쌍 — 높은 유사도 기대
-    TestPair("개",    "강아지",  "synonym"),
-    TestPair("고양이", "야옹이",  "synonym"),
-    TestPair("말차",  "마차",    "synonym"),   # 주의: 말차(matcha)↔마차(carriage), 의미적 차이 있는 실험용 쌍
+    TestPair(InterestItem("Pets",  "개"),    InterestItem("Pets",  "강아지"),  "synonym"),
+    TestPair(InterestItem("Pets",  "고양이"), InterestItem("Pets",  "야옹이"),  "synonym"),
+    TestPair(InterestItem("Food",  "말차"),   InterestItem("Food",  "마차"),    "synonym"),
     # 구분 쌍 — 낮은 유사도 기대
-    TestPair("토트넘", "리버풀", "distinct"),
-    TestPair("말차",  "우롱차",  "distinct"),
+    TestPair(InterestItem("Sport", "토트넘"), InterestItem("Sport", "리버풀"), "distinct"),
+    TestPair(InterestItem("Food",  "말차"),   InterestItem("Food",  "우롱차"),  "distinct"),
     # 무관 쌍 — 매우 낮은 유사도 기대
-    TestPair("말차",  "토트넘",  "irrelevant"),
+    TestPair(InterestItem("Food",  "말차"),   InterestItem("Sport", "토트넘"), "irrelevant"),
 ]
+
+def _build_dataset_pairs() -> List[TestPair]:
+    raw = build_test_pairs(INTERESTS, n_intra=5, n_inter=5, n_irrelevant=3)
+    return [TestPair(a, b, t) for a, b, t in raw]
+
+TEST_PAIRS: List[TestPair] = _build_dataset_pairs() if USE_DATASET else _MANUAL_PAIRS
 
 
 # ---------------------------------------------------------------------------
@@ -179,14 +184,20 @@ def _build_prompt(template: str, keyword: str, context: str) -> str:
 
 
 def run_experiment() -> Tuple[List[PairResult], List[StrategyAnalysis]]:
-    # Step 1: 모든 키워드의 context를 미리 확보 (키워드당 1회, 전략 간 재사용)
-    all_keywords = list({kw for pair in TEST_PAIRS for kw in (pair.keyword_a, pair.keyword_b)})
+    # Step 1: 모든 아이템의 context를 미리 확보 (아이템당 1회, 전략 간 재사용)
+    all_items = list({
+        item.search_query: item
+        for pair in TEST_PAIRS
+        for item in (pair.item_a, pair.item_b)
+    }.values())
+
     print("=" * 60)
     print("Step 1: 키워드별 Context 확보 (google_search)")
     print("=" * 60)
+    # search_query를 키로 캐싱
     context_cache: Dict[str, str] = {}
-    for keyword in all_keywords:
-        context_cache[keyword] = fetch_context(keyword)
+    for item in all_items:
+        context_cache[item.search_query] = fetch_context(item.search_query)
 
     # Step 2: 전략별 실험
     all_pair_results: List[PairResult] = []
@@ -197,11 +208,11 @@ def run_experiment() -> Tuple[List[PairResult], List[StrategyAnalysis]]:
         print(f"{'='*60}")
 
         for pair in TEST_PAIRS:
-            context_a = context_cache[pair.keyword_a]
-            context_b = context_cache[pair.keyword_b]
+            context_a = context_cache[pair.item_a.search_query]
+            context_b = context_cache[pair.item_b.search_query]
 
-            prompt_a = _build_prompt(strategy.prompt_template, pair.keyword_a, context_a)
-            prompt_b = _build_prompt(strategy.prompt_template, pair.keyword_b, context_b)
+            prompt_a = _build_prompt(strategy.prompt_template, pair.item_a.item, context_a)
+            prompt_b = _build_prompt(strategy.prompt_template, pair.item_b.item, context_b)
 
             text_a = call_gemini(prompt_a)
             text_b = call_gemini(prompt_b)
@@ -212,8 +223,8 @@ def run_experiment() -> Tuple[List[PairResult], List[StrategyAnalysis]]:
 
             all_pair_results.append(PairResult(
                 strategy_name=strategy.name,
-                keyword_a=pair.keyword_a,
-                keyword_b=pair.keyword_b,
+                keyword_a=pair.item_a.item,
+                keyword_b=pair.item_b.item,
                 pair_type=pair.pair_type,
                 context_a=context_a,
                 context_b=context_b,
@@ -223,7 +234,7 @@ def run_experiment() -> Tuple[List[PairResult], List[StrategyAnalysis]]:
                 text_b=text_b,
                 similarity=sim,
             ))
-            print(f"  ({pair.keyword_a}, {pair.keyword_b}) [{pair.pair_type:>10}]: {sim:.4f}")
+            print(f"  ({pair.item_a.item}, {pair.item_b.item}) [{pair.pair_type:>10}]: {sim:.4f}")
 
     analyses = _compute_analysis(all_pair_results)
     return all_pair_results, analyses

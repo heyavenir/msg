@@ -38,17 +38,23 @@ from utils import (
     get_embedding,
     search_and_enrich,
 )
-from dataset import InterestItem
+from dataset import INTERESTS, InterestItem
 
 # ---------------------------------------------------------------------------
 # 설정
 # ---------------------------------------------------------------------------
 
-KEYWORDS: List[InterestItem] = [
+# USE_DATASET = True  → dataset.py의 INTERESTS 전체 사용 (80개 × 5회 = 400 API 호출)
+# USE_DATASET = False → 아래 수동 지정 키워드 사용
+USE_DATASET: bool = False
+
+_MANUAL_KEYWORDS: List[InterestItem] = [
     InterestItem(category="Pets",  item="도마뱀"),
     InterestItem(category="Food",  item="말차"),
     InterestItem(category="Sport", item="토트넘"),
 ]
+
+KEYWORDS: List[InterestItem] = INTERESTS if USE_DATASET else _MANUAL_KEYWORDS
 NUM_RUNS: int = 5
 COSINE_THRESHOLD: float = 0.98
 

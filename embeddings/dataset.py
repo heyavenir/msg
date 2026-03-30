@@ -7,8 +7,12 @@
 예) "야옹이" → "야옹이 Pets" (웹툰 작가 대신 고양이로 검색)
 """
 
+import random
+from collections import defaultdict
 from dataclasses import dataclass
-from typing import List
+from typing import Dict, List, Literal, Tuple
+
+PairType = Literal["synonym", "distinct", "irrelevant"]
 
 
 @dataclass
@@ -121,3 +125,65 @@ _RAW = [
 ]
 
 INTERESTS: List[InterestItem] = _parse(_RAW)
+
+
+def build_test_pairs(
+    interests: List[InterestItem] = None,
+    n_intra: int = 5,
+    n_inter: int = 5,
+    n_irrelevant: int = 3,
+    seed: int = 42,
+) -> List[Tuple[InterestItem, InterestItem, PairType]]:
+    """
+    데이터셋에서 테스트 쌍 자동 생성.
+
+    - synonym   (intra-category):  같은 카테고리 → 높은 유사도 기대
+    - distinct  (inter-category):  다른 카테고리 → 낮은 유사도 기대
+    - irrelevant (cross-domain):   가장 동떨어진 카테고리 쌍
+
+    Args:
+        n_intra:     synonym 쌍 수
+        n_inter:     distinct 쌍 수
+        n_irrelevant: irrelevant 쌍 수
+        seed:        재현성을 위한 랜덤 시드
+
+    Returns:
+        List of (item_a, item_b, pair_type)
+    """
+    rng = random.Random(seed)
+    if interests is None:
+        interests = INTERESTS
+
+    # 카테고리별 그룹핑
+    by_category: Dict[str, List[InterestItem]] = defaultdict(list)
+    for item in interests:
+        by_category[item.category].append(item)
+
+    categories = list(by_category.keys())
+    pairs: List[Tuple[InterestItem, InterestItem, PairType]] = []
+
+    # synonym: 같은 카테고리에서 2개 샘플
+    cats_with_2plus = [c for c in categories if len(by_category[c]) >= 2]
+    for _ in range(n_intra):
+        cat = rng.choice(cats_with_2plus)
+        a, b = rng.sample(by_category[cat], 2)
+        pairs.append((a, b, "synonym"))
+
+    # distinct: 다른 카테고리에서 1개씩
+    for _ in range(n_inter):
+        cat_a, cat_b = rng.sample(categories, 2)
+        a = rng.choice(by_category[cat_a])
+        b = rng.choice(by_category[cat_b])
+        pairs.append((a, b, "distinct"))
+
+    # irrelevant: 카테고리 정렬 후 양 끝에서 샘플 (가장 동떨어진 쌍)
+    sorted_cats = sorted(categories)
+    half = len(sorted_cats) // 2
+    far_pairs = list(zip(sorted_cats[:half], sorted_cats[half:]))
+    for _ in range(n_irrelevant):
+        cat_a, cat_b = rng.choice(far_pairs)
+        a = rng.choice(by_category[cat_a])
+        b = rng.choice(by_category[cat_b])
+        pairs.append((a, b, "irrelevant"))
+
+    return pairs
