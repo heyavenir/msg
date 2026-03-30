@@ -163,18 +163,30 @@ class TestPair:
 
 USE_DATASET: bool = True
 
+# 고정 synonym 쌍 (데이터셋과 무관하게 항상 사용)
+_SYNONYM_PAIRS: List[TestPair] = [
+    TestPair(InterestItem("Pets",     "개"),   InterestItem("Pets",     "강아지"),        "synonym"),
+    TestPair(InterestItem("Pets",     "고양이"), InterestItem("Pets",     "야옹이"),        "synonym"),
+    TestPair(InterestItem("Sport",    "농구"),  InterestItem("Sport",    "바스켓볼"),       "synonym"),
+    TestPair(InterestItem("Vehicles", "전기차"), InterestItem("Vehicles", "EV"),           "synonym"),
+    TestPair(InterestItem("Game",     "롤"),   InterestItem("Game",     "리그오브레전드"), "synonym"),
+]
+
 _MANUAL_PAIRS: List[TestPair] = [
-    TestPair(InterestItem("Pets",  "개"),    InterestItem("Pets",  "강아지"),  "synonym"),
-    TestPair(InterestItem("Pets",  "고양이"), InterestItem("Pets",  "야옹이"),  "synonym"),
-    TestPair(InterestItem("Food",  "말차"),   InterestItem("Food",  "마차"),    "synonym"),
-    TestPair(InterestItem("Sport", "토트넘"), InterestItem("Sport", "리버풀"), "distinct"),
-    TestPair(InterestItem("Food",  "말차"),   InterestItem("Food",  "우롱차"),  "distinct"),
-    TestPair(InterestItem("Food",  "말차"),   InterestItem("Sport", "토트넘"), "irrelevant"),
+    *_SYNONYM_PAIRS,
+    # distinct: 같은 카테고리, 다른 아이템
+    TestPair(InterestItem("Sport", "토트넘"),  InterestItem("Sport", "리버풀"),  "distinct"),
+    TestPair(InterestItem("Food",  "말차"),    InterestItem("Food",  "우롱차"),  "distinct"),
+    # irrelevant: 다른 카테고리
+    TestPair(InterestItem("Food",  "말차"),    InterestItem("Sport", "토트넘"), "irrelevant"),
 ]
 
 def _build_dataset_pairs() -> List[TestPair]:
-    raw = build_test_pairs(INTERESTS, n_intra=5, n_inter=5, n_irrelevant=3)
-    return [TestPair(a, b, t) for a, b, t in raw]
+    # n_intra=0: INTERESTS에서 synonym 뽑지 않음 (진짜 동의어가 없으므로)
+    raw = build_test_pairs(INTERESTS, n_intra=0, n_inter=8, n_irrelevant=5)
+    pairs = [TestPair(a, b, t) for a, b, t in raw]
+    pairs.extend(_SYNONYM_PAIRS)
+    return pairs
 
 TEST_PAIRS: List[TestPair] = _build_dataset_pairs() if USE_DATASET else _MANUAL_PAIRS
 
