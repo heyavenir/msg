@@ -117,6 +117,7 @@ def run_experiment() -> List[KeywordConsistencyResult]:
             print(f"\n  --- run {i + 1}/{NUM_RUNS} ---")
 
             # 검색 + 프로필 생성을 단일 API 호출로 처리 (실제 서비스 시뮬레이션)
+            # search_query = "keyword category" 형태로 모호성 제거
             context, text = search_and_enrich(keyword, ENRICHMENT_INSTRUCTION)
 
             runs.append(RunRecord(run_index=i, context=context, text=text))

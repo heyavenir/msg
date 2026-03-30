@@ -211,16 +211,16 @@ def _post_gemini(payload: dict, max_retries: int = 3) -> str:
     raise RuntimeError(f"Gemini API {max_retries}회 재시도 실패: {last_exc}")
 
 
-def fetch_context(keyword: str, model_name: str = GEMINI_MODEL) -> str:
+def fetch_context(search_query: str, model_name: str = GEMINI_MODEL) -> str:
     """
-    Gemini google_search 툴을 사용해 키워드에 대한 사실적 context를 확보.
-    exp2에서 전략 간 비교를 위해 context를 고정할 때 사용.
+    Gemini google_search 툴로 context 확보. (exp2 전용)
 
-    Returns:
-        키워드에 대한 사실적 요약 텍스트
+    Args:
+        search_query: 검색 쿼리. InterestItem.search_query 사용 권장.
+                      예) "Persian Cat Pets"  — 카테고리 포함으로 모호성 제거
     """
     prompt = (
-        f"Search for '{keyword}' online. "
+        f"Search for '{search_query}' online. "
         f"Summarize the key facts in 2-3 sentences. "
         f"Output only the summary, no preamble."
     )
@@ -230,39 +230,33 @@ def fetch_context(keyword: str, model_name: str = GEMINI_MODEL) -> str:
         "tools": [{"google_search": {}}],
         "temperature": 0,
     }
-    print(f"  [context fetch] '{keyword}' 검색 중...")
+    print(f"  [context fetch] '{search_query}' 검색 중...")
     context = _post_gemini(payload)
     print(f"  [context fetch] 완료: {context[:80]}...")
     return context
 
 
 def search_and_enrich(
-    keyword: str,
+    search_query: str,
     enrichment_instruction: str,
     model_name: str = GEMINI_MODEL,
 ) -> Tuple[str, str]:
     """
     google_search + 영문 프로필 생성을 단일 API 호출로 처리. (exp1 전용)
 
-    Gemini가 검색 후 아래 형식으로 응답:
-        CONTEXT: <검색 결과 요약>
-        PROFILE: <영문 프로필>
-
-    한국어 키워드는 자동으로 영어 equivalent로 변환하여 프로필 생성.
-
     Args:
-        keyword: 검색할 키워드 (한국어 가능)
-        enrichment_instruction: PROFILE 생성 지침 (전략별 다름)
+        search_query: 검색 쿼리. InterestItem.search_query 사용 권장.
+                      예) "Persian Cat Pets"  — 카테고리 포함으로 모호성 제거
+        enrichment_instruction: PROFILE 생성 지침
 
     Returns:
         (context, profile) 튜플
     """
     prompt = (
-        f"Search for '{keyword}' online.\n\n"
+        f"Search for '{search_query}' online.\n\n"
         f"Respond in EXACTLY this format with no other text:\n"
         f"CONTEXT: [2-3 sentences summarizing key facts from search results]\n"
-        f"PROFILE: [{enrichment_instruction} "
-        f"If '{keyword}' is Korean or non-English, use its English equivalent as the subject.]\n"
+        f"PROFILE: [{enrichment_instruction}]\n"
     )
     payload = {
         "model": model_name,
@@ -271,10 +265,7 @@ def search_and_enrich(
         "temperature": 0,
     }
     raw = _post_gemini(payload)
-
-    # CONTEXT / PROFILE 파싱
-    context, profile = _parse_context_profile(raw)
-    return context, profile
+    return _parse_context_profile(raw)
 
 
 def _parse_context_profile(raw: str) -> Tuple[str, str]:
